@@ -1,6 +1,7 @@
-pragma solidity ^0.4.25;
+// SPDX-License-Identifier: MIT
+pragma solidity >=0.4.21 <=0.8.16;
 
-import "../node_modules/openzeppelin-solidity/contracts/math/SafeMath.sol";
+import '../node_modules/@openzeppelin/contracts/utils/math/SafeMath.sol';
 
 contract FlightSuretyData {
     using SafeMath for uint256;
@@ -11,6 +12,36 @@ contract FlightSuretyData {
 
     address private contractOwner;                                      // Account used to deploy contract
     bool private operational = true;                                    // Blocks all state changes throughout the contract if false
+
+    struct Airline {
+        address airlineAddress;
+        string name;
+        bool active;
+        uint256 balance;
+        address [] voters;
+    }
+    mapping(address => Airline) private airlines;
+    uint256 private airlineSize = 0;
+
+
+    struct Flight {
+        address airlineAddress;
+        string flightNo;
+        string origin;
+        string destination;
+        bool active;
+        string status;
+        uint256 depatureTime;
+    }
+    mapping(bytes32 => Flight) private flights;
+    uint256 private flightSize = 0; 
+
+    struct Passenger {
+        address passengerAddress;
+        mapping(bytes32 => uint256) flightInsurances;
+        uint256 balance;
+    }
+    mapping(address => Passenger) private passengers;
 
     /********************************************************************************************/
     /*                                       EVENT DEFINITIONS                                  */
@@ -46,6 +77,7 @@ contract FlightSuretyData {
         require(operational, "Contract is currently not operational");
         _;  // All modifiers require an "_" which indicates where the function body will be added
     }
+
 
     /**
     * @dev Modifier that requires the "ContractOwner" account to be the function caller
@@ -100,24 +132,69 @@ contract FlightSuretyData {
     */   
     function registerAirline
                             (   
+                                address airlineAddress, 
+                                string memory airlineName,
+                                address sender
                             )
-                            external
-                            pure
+                            external requireIsOperational
     {
+        Airline storage airline = airlines[airlineAddress];
+        airline.airlineAddress = airlineAddress;
+        airline.name = airlineName;
+        airline.active = true;
+        airlineSize = airlineSize + 1;
     }
 
+    modifier isAirline(address airlineAddress) {
+        require(airlines[airlineAddress].active, 'Is not an airline');
+        _;
+    }
+
+    function registerFlight
+                            (   
+                                address airlineAddress,
+                                string memory flightNo, 
+                                string memory origin, 
+                                string memory destination, 
+                                uint256 departureTime
+                            )
+                            external requireIsOperational
+    {
+        bytes32 key = keccak256(abi.encodePacked(airlineAddress, flightNo)); 
+        Flight storage flight = flights[key];
+        flight.airlineAddress = airlineAddress;
+        flight.flightNo = flightNo;
+        flight.origin = origin;
+        flight.destination = destination;
+        flight.depatureTime = departureTime;
+        flight.active = true;
+        flightSize = flightSize + 1;
+
+    }
 
    /**
     * @dev Buy insurance for a flight
     *
     */   
     function buy
-                            (                             
+                            (
+                                address airlineAddress,
+                                address passengerAddress,
+                                string memory flightNo,
+                                uint256 departureTime,                      
+                                uint256 value                  
                             )
                             external
-                            payable
+                            payable requireIsOperational
     {
-
+        bytes32 key = getFlightKey(airlineAddress, flightNo, departureTime); 
+        if (passengers[passengerAddress].passengerAddress == passengerAddress) {
+            passengers[passengerAddress].flightInsurances[key] = value;
+        } else {
+            Passenger storage passenger = passengers[passengerAddress];
+            passenger.flightInsurances[key] = value;
+        }
+        airlines[flights[key].airlineAddress].balance = airlines[flights[key].airlineAddress].balance.add(value);
     }
 
     /**
@@ -127,7 +204,7 @@ contract FlightSuretyData {
                                 (
                                 )
                                 external
-                                pure
+                                requireIsOperational 
     {
     }
     
@@ -138,10 +215,14 @@ contract FlightSuretyData {
     */
     function pay
                             (
+                                address payable passengerAddress
                             )
                             external
-                            pure
+                            requireIsOperational
     {
+        uint256 amount = passengers[passengerAddress].balance;
+        passengers[passengerAddress].balance = 0;
+        passengerAddress.transfer(amount);
     }
 
    /**
@@ -151,10 +232,13 @@ contract FlightSuretyData {
     */   
     function fund
                             (   
+                                address airlineAddress,
+                                uint256 value
                             )
                             public
-                            payable
+                            payable requireIsOperational
     {
+        airlines[airlineAddress].balance = airlines[airlineAddress].balance.add(value);
     }
 
     function getFlightKey
@@ -174,13 +258,12 @@ contract FlightSuretyData {
     * @dev Fallback function for funding smart contract.
     *
     */
-    function() 
+    fallback() 
                             external 
                             payable 
     {
-        fund();
     }
 
-
+    function authorizeCaller(address callerAddress) public {}
 }
 
